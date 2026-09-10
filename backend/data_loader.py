@@ -48,6 +48,25 @@ def _find_file(directory: Path, stem_candidates: list[str]):
     return None
 
 
+def dataset_fingerprint() -> str:
+    """A cheap cache key for 'what dataset is currently active, in what
+    state'. Combines the active directory with each dataset file's
+    modification time, so uploading a new file to the same path (the
+    upload directory is reused across uploads) still invalidates any
+    cache keyed on this value."""
+
+    directory = get_active_data_dir()
+    parts = [str(directory)]
+
+    for stems in (["projects"], ["documents"], ["project_images", "images"], ["inspections"]):
+        path = _find_file(directory, stems)
+
+        if path is not None:
+            parts.append(f"{path.name}:{path.stat().st_mtime_ns}")
+
+    return "|".join(parts)
+
+
 def load_projects() -> pd.DataFrame:
     directory = get_active_data_dir()
     path = _find_file(directory, ["projects"])

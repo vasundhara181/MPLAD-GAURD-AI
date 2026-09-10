@@ -1,6 +1,13 @@
+import threading
+
 import pandas as pd
 
+from citizen_feedback import citizen_feedback_fingerprint
+from data_loader import dataset_fingerprint
 from explainability import build_explainable_risk
+
+_cache = {"key": None, "df": None}
+_cache_lock = threading.Lock()
 
 
 def determine_priority(row):
@@ -69,10 +76,50 @@ def determine_alert_type(row):
     if any("image" in reason.lower() for reason in reasons):
         return "IMAGE EVIDENCE ALERT"
 
+    if any("ml model" in reason.lower() or "isolation forest" in reason.lower() for reason in reasons):
+        return "ML ANOMALY ALERT"
+
+    if any("duplicate" in reason.lower() or "re-registered" in reason.lower() for reason in reasons):
+        return "DUPLICATE PROJECT ALERT"
+
+    if any("location overlaps" in reason.lower() for reason in reasons):
+        return "GEO-SPATIAL OVERLAP ALERT"
+
+    if any("citizen report" in reason.lower() for reason in reasons):
+        return "CITIZEN REPORTED ALERT"
+
     return "GENERAL REVIEW ALERT"
 
 
 def build_smart_alerts():
+    """Cached wrapper: the full 9-signal pipeline (rule-based modules +
+    Isolation Forest + TF-IDF duplicate detection) is expensive, and
+    every dashboard load hits several endpoints that each need this
+    same result (summary, analysis, insights, alerts). Recompute only
+    when the active dataset actually changes (upload/reset), not on
+    every request."""
+
+    key = dataset_fingerprint() + "|" + citizen_feedback_fingerprint()
+
+    if _cache["key"] == key and _cache["df"] is not None:
+        return _cache["df"].copy()
+
+    # Serialize computation: without this, several requests racing on a
+    # cold cache (e.g. a dashboard's first load, which hits 4+ endpoints
+    # in parallel) would each independently run the full pipeline.
+    with _cache_lock:
+        if _cache["key"] == key and _cache["df"] is not None:
+            return _cache["df"].copy()
+
+        df = _compute_smart_alerts()
+
+        _cache["key"] = key
+        _cache["df"] = df
+
+    return df.copy()
+
+
+def _compute_smart_alerts():
 
     df = build_explainable_risk().copy()
 
@@ -105,10 +152,34 @@ def build_smart_alerts():
 
     # ------------------------------------------------
     # ALERT FLAG
+    #
+    # A weighted blend is right for *ranking* projects, but it can
+    # bury one sharp, specific finding (e.g. 100% of funds released
+    # instantly, or a near-duplicate project elsewhere) under a wash
+    # of quiet signals, since each individual signal only carries a
+    # fraction of the total weight. So a project also qualifies for
+    # an alert if any single high-precision, low-noise signal fires
+    # on its own -- these are the ones with a clear rule/model behind
+    # them (not just "somewhat overdue," which is common enough in a
+    # real portfolio that it belongs in the blended score, not an
+    # independent trigger).
     # ------------------------------------------------
 
+    sharp_signal_columns = [
+        "financial_anomaly",
+        "document_anomaly",
+        "image_anomaly",
+        "duplicate_anomaly",
+        "geo_anomaly",
+        "ml_anomaly",
+        "citizen_anomaly",
+    ]
+
+    df["sharp_signal_fired"] = df[sharp_signal_columns].any(axis=1)
+
     df["alert_required"] = (
-        df["overall_risk_score"] >= 40
+        (df["overall_risk_score"] >= 40)
+        | df["sharp_signal_fired"]
     )
 
     # ------------------------------------------------
@@ -116,6 +187,11 @@ def build_smart_alerts():
     # ------------------------------------------------
 
     df["alert_severity"] = "NONE"
+
+    df.loc[
+        df["sharp_signal_fired"],
+        "alert_severity"
+    ] = "MEDIUM"
 
     df.loc[
         df["overall_risk_score"] >= 40,

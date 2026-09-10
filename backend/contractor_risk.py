@@ -56,8 +56,17 @@ def calculate_contractor_risk():
         .rename("project_count")
     )
 
+    # Uses the project's own recorded status, not a today-vs-expected
+    # -completion-date comparison -- delay_days drifts with wall-clock
+    # time relative to when the dataset was captured (see
+    # delay_detection.py), which would otherwise make this aggregate
+    # inflate for nearly every contractor as a dataset ages.
+    is_delayed_status = (
+        df["status"].fillna("").astype(str).str.lower() == "delayed"
+    )
+
     delay_counts = (
-        df[df["delay_days"] > 30]
+        df[is_delayed_status]
         .groupby("contractor")["project_id"]
         .count()
         .rename("delayed_projects")
@@ -135,12 +144,6 @@ def calculate_contractor_risk():
     # Very low average completion
     contractor_summary.loc[
         contractor_summary["average_completion"] < 50,
-        "contractor_risk_score"
-    ] += 20
-
-    # Average delay
-    contractor_summary.loc[
-        contractor_summary["average_delay_days"] > 60,
         "contractor_risk_score"
     ] += 20
 

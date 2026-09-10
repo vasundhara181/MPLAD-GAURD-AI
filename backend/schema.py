@@ -388,4 +388,6 @@ SIGNAL_REQUIREMENTS: dict[str, list[str]] = {
     "inspection": ["__inspections_file__"],
     "ml_anomaly": ["completion_percentage", "sanctioned_amount", "utilized_amount"],
     "duplicate": ["project_name"],
+    "geo": ["latitude", "longitude"],
+    "citizen": ["__always_available__"],
 }

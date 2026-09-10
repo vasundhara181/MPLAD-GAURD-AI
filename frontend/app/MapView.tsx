@@ -19,6 +19,7 @@ type MapProject = {
   overall_risk_score: number;
   risk_level: string;
   risk_signal_count: number;
+  geo_anomaly?: boolean;
 };
 
 
@@ -76,22 +77,30 @@ function getMarkerRadius(level: string): number {
 
 export default function MapView({
   projects,
+  center,
+  zoom,
+  heightClassName = "h-[600px]",
 }: {
   projects: MapProject[];
+  center?: [number, number];
+  zoom?: number;
+  heightClassName?: string;
 }) {
 
-  const center: [number, number] = [
+  const mapCenter: [number, number] = center ?? [
     20.5937,
     78.9629,
   ];
 
+  const mapZoom = zoom ?? 5;
+
 
   return (
-    <div className="h-[600px] w-full overflow-hidden rounded-2xl">
+    <div className={`${heightClassName} w-full overflow-hidden rounded-2xl`}>
 
       <MapContainer
-        center={center}
-        zoom={5}
+        center={mapCenter}
+        zoom={mapZoom}
         scrollWheelZoom={true}
         className="h-full w-full"
       >
@@ -130,14 +139,24 @@ export default function MapView({
                 Number(project.longitude),
               ]}
 
-              radius={markerRadius}
+              radius={project.geo_anomaly ? markerRadius + 3 : markerRadius}
 
-              pathOptions={{
-                color: riskColor,
-                fillColor: riskColor,
-                fillOpacity: 0.75,
-                weight: 2,
-              }}
+              pathOptions={
+                project.geo_anomaly
+                  ? {
+                      color: "#8b5cf6",
+                      fillColor: riskColor,
+                      fillOpacity: 0.75,
+                      weight: 4,
+                      dashArray: "3, 3",
+                    }
+                  : {
+                      color: riskColor,
+                      fillColor: riskColor,
+                      fillOpacity: 0.75,
+                      weight: 2,
+                    }
+              }
             >
 
               {/* ==========================================
@@ -185,6 +204,12 @@ export default function MapView({
                     <strong>Risk Signals:</strong>{" "}
                     {project.risk_signal_count}
                   </p>
+
+                  {project.geo_anomaly && (
+                    <p className="mt-1 text-violet-700 font-semibold">
+                      ⬤ Overlaps another project&apos;s location (within 300 m)
+                    </p>
+                  )}
 
                 </div>
 

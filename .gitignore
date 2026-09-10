@@ -4,9 +4,10 @@ __pycache__/
 *.pyc
 backend/uvicorn.log
 
-# Runtime data (uploaded datasets, verification DB)
+# Runtime data (uploaded datasets, verification + citizen feedback DBs)
 data/uploaded/
 data/verification_feedback.db
+data/citizen_feedback.db
 
 # Node (frontend has its own, more detailed .gitignore too)
 node_modules/

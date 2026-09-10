@@ -5,14 +5,19 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from data_loader import load_projects
 
-SIMILARITY_THRESHOLD = 0.80
+# Calibrated against this project's own synthetic ground-truth "duplicate"
+# scenario: genuine injected duplicates score 0.56-0.66 on name+type text
+# (district excluded -- see below), normal projects average ~0.39 with a
+# long tail, and only ~1.7% of normal projects cross 0.55 by coincidence.
+# 0.80 (the original guess) caught zero of the 15 known duplicates.
+SIMILARITY_THRESHOLD = 0.55
 MIN_ROWS_TO_RUN = 5
 
 
 def detect_similar_projects() -> pd.DataFrame:
-    """Pairwise TF-IDF + cosine similarity over project name/type/district
-    text, vectorized (no Python-level double loop) so it stays fast even
-    at a few thousand rows."""
+    """Pairwise TF-IDF + cosine similarity over project name/type text,
+    vectorized (no Python-level double loop) so it stays fast even at a
+    few thousand rows."""
 
     df = load_projects().copy()
 
@@ -25,12 +30,15 @@ def detect_similar_projects() -> pd.DataFrame:
             ]
         )
 
+    # District is deliberately excluded: two unrelated projects that
+    # happen to share a project_type and district (common at 1,000+ rows
+    # across ~30 districts) otherwise inflate similarity enough to blur
+    # into genuine duplicates -- name + type alone separates the two
+    # populations far more cleanly.
     text = (
         df["project_name"].fillna("").astype(str)
         + " "
         + df["project_type"].fillna("").astype(str)
-        + " "
-        + df["district"].fillna("").astype(str)
     )
 
     vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, 2))

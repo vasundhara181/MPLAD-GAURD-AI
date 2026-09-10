@@ -74,6 +74,24 @@ def detect_financial_anomalies():
     df.loc[condition_5, "financial_risk_score"] += 20
 
     # -------------------------------------------------
+    # RULE 6
+    # Full sanctioned amount released instantly, with no
+    # staged/progress-linked disbursement. A real MPLAD
+    # disbursement is normally tranched against progress;
+    # 100% released up front is a recognized red flag for
+    # preferential treatment / kickback risk.
+    # -------------------------------------------------
+
+    release_ratio = (
+        df["released_amount"] / df["sanctioned_amount"]
+    )
+
+    condition_6 = release_ratio >= 0.99
+
+    df.loc[condition_6, "financial_anomaly"] = True
+    df.loc[condition_6, "financial_risk_score"] += 40
+
+    # -------------------------------------------------
     # Limit financial score to 0–100
     # -------------------------------------------------
 

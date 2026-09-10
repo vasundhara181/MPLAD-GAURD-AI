@@ -7,4 +7,5 @@
 frontend/.env*
 data/uploaded
 data/verification_feedback.db
+data/citizen_feedback.db
 .git

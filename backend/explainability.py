@@ -216,6 +216,33 @@ def generate_explanation(row):
         )
 
     # ---------------------------------------------
+    # CITIZEN FEEDBACK
+    # ---------------------------------------------
+
+    if row.get("citizen_anomaly"):
+
+        report_count = int(row.get("citizen_report_count", 0))
+
+        reasons.append(
+            f"{report_count} citizen report(s) filed against this project "
+            f"(unverified, but a corroborating signal)"
+        )
+
+    # ---------------------------------------------
+    # GEO-SPATIAL OVERLAP
+    # ---------------------------------------------
+
+    if row.get("geo_anomaly"):
+
+        overlap_count = row.get("geo_overlap_count", 0)
+
+        reasons.append(
+            f"Project location overlaps with {int(overlap_count)} "
+            f"other unrelated project(s) within 300 m — possible "
+            f"duplicate site claim"
+        )
+
+    # ---------------------------------------------
     # CONTRACTOR
     # ---------------------------------------------
 

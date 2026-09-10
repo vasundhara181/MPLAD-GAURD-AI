@@ -13,65 +13,48 @@ def detect_delays():
     # Create delay risk score
     df["delay_risk_score"] = 0.0
 
+    status_lower = df["status"].fillna("").astype(str).str.lower()
+
     # -------------------------------------------------
-    # RULE 1
-    # Project is already beyond expected completion
+    # RULE 1 (primary trigger)
+    # The project's own recorded status says "Delayed".
+    #
+    # A today-vs-expected-completion-date comparison silently
+    # drifts as real time passes relative to when a dataset
+    # snapshot was captured -- a project sanctioned to finish in
+    # 2025 looks "delayed by a year" if this runs in 2026, whether
+    # or not it's actually behind schedule as of its own last
+    # known status. The status field doesn't have that problem,
+    # and it's a standard field in real project-tracking data.
     # -------------------------------------------------
 
-    condition_1 = (
-        df["delay_days"] > 0
-    )
+    condition_1 = status_lower == "delayed"
 
     df.loc[condition_1, "delay_anomaly"] = True
-    df.loc[condition_1, "delay_risk_score"] += 40
+    df.loc[condition_1, "delay_risk_score"] += 60
 
     # -------------------------------------------------
-    # RULE 2
-    # Delay greater than 30 days
+    # RULES 2-4 (severity escalation only)
+    #
+    # These only ADD to the score of a project already flagged by
+    # Rule 1 -- they deliberately do not set delay_anomaly on their
+    # own. A fixed day-count threshold can't distinguish "genuinely
+    # overdue" from "this dataset is simply older than today" without
+    # knowing how current the dataset actually is, so using it as an
+    # independent trigger produces exactly that false-positive rate
+    # on a dataset whose reference date has drifted.
     # -------------------------------------------------
 
-    condition_2 = (
-        df["delay_days"] > 30
-    )
+    already_flagged = df["delay_anomaly"]
 
-    df.loc[condition_2, "delay_risk_score"] += 20
+    df.loc[already_flagged & (df["delay_days"] > 90), "delay_risk_score"] += 15
+    df.loc[already_flagged & (df["delay_days"] > 180), "delay_risk_score"] += 15
 
-    # -------------------------------------------------
-    # RULE 3
-    # Delay greater than 90 days
-    # -------------------------------------------------
-
-    condition_3 = (
-        df["delay_days"] > 90
-    )
-
-    df.loc[condition_3, "delay_risk_score"] += 20
-
-    # -------------------------------------------------
-    # RULE 4
-    # Project is overdue but not completed
-    # -------------------------------------------------
-
-    condition_4 = (
-        (df["delay_days"] > 0)
-        & (df["status"].str.lower() != "completed")
-    )
-
-    df.loc[condition_4, "delay_anomaly"] = True
-    df.loc[condition_4, "delay_risk_score"] += 20
-
-    # -------------------------------------------------
-    # RULE 5
-    # Project has been running for a very long time
-    # -------------------------------------------------
-
-    condition_5 = (
-        df["actual_duration_days"]
-        > df["planned_duration_days"] * 1.5
-    )
-
-    df.loc[condition_5, "delay_anomaly"] = True
-    df.loc[condition_5, "delay_risk_score"] += 20
+    df.loc[
+        already_flagged
+        & (df["actual_duration_days"] > df["planned_duration_days"] * 1.5),
+        "delay_risk_score"
+    ] += 10
 
     # -------------------------------------------------
     # Limit score to 0–100

@@ -15,6 +15,13 @@ from data_loader import (
     reset_to_default_dataset,
     save_uploaded_dataset,
 )
+from citizen_feedback import (
+    ALLOWED_CATEGORIES as CITIZEN_ALLOWED_CATEGORIES,
+    get_citizen_reports,
+    submit_citizen_report,
+)
+from geo_detection import detect_geo_anomalies
+from insights import build_portfolio_insights
 from schema import SIGNAL_REQUIREMENTS
 from smart_alerts import build_smart_alerts
 from verification import save_verification, get_verification_history
@@ -69,6 +76,13 @@ app.add_middleware(
 class VerificationRequest(BaseModel):
     decision: str
     remarks: str = ""
+
+
+class CitizenReportRequest(BaseModel):
+    category: str
+    description: str
+    reporter_name: str = ""
+    reporter_contact: str = ""
 
 
 # ============================================================
@@ -135,6 +149,11 @@ def data_readiness():
             and project_availability.get("sanctioned_amount")
         ),
         "duplicate": bool(project_availability.get("project_name")),
+        "geo": bool(
+            project_availability.get("latitude")
+            and project_availability.get("longitude")
+        ),
+        "citizen": True,
     }
 
     return {
@@ -363,6 +382,22 @@ def get_alerts():
 
 
 # ============================================================
+# PORTFOLIO AI INSIGHTS
+#
+# Fully automatic aggregate analysis over every project in the
+# dataset -- no human verification required to produce this. This is
+# the "complete overview" layer: which districts/contractors/project
+# types concentrate risk, how much sanctioned money sits in
+# HIGH/CRITICAL projects, and which of the 9 AI signals fires most
+# often across the whole portfolio.
+# ============================================================
+
+@app.get("/insights")
+def get_insights():
+    return build_portfolio_insights()
+
+
+# ============================================================
 # GEO-SPATIAL PROJECT DATA
 # ============================================================
 
@@ -393,7 +428,8 @@ def get_map_projects():
         "project_id",
         "overall_risk_score",
         "risk_level",
-        "risk_signal_count"
+        "risk_signal_count",
+        "geo_anomaly"
     ]
 
     risk_data = risk_df[
@@ -433,7 +469,8 @@ def get_map_projects():
         "longitude",
         "overall_risk_score",
         "risk_level",
-        "risk_signal_count"
+        "risk_signal_count",
+        "geo_anomaly"
     ]
 
     df = df[columns]
@@ -621,6 +658,41 @@ def get_project(project_id: str):
                 0
             ),
 
+        "geo_risk_score":
+            row.get(
+                "geo_risk_score",
+                0
+            ),
+
+        "geo_overlap_count":
+            row.get(
+                "geo_overlap_count",
+                0
+            ),
+
+        "citizen_risk_score":
+            row.get(
+                "citizen_risk_score",
+                0
+            ),
+
+        "citizen_report_count":
+            row.get(
+                "citizen_report_count",
+                0
+            ),
+
+
+        # -------------------------------
+        # Location
+        # -------------------------------
+
+        "latitude":
+            row.get("latitude"),
+
+        "longitude":
+            row.get("longitude"),
+
 
         # -------------------------------
         # AI Recommendation
@@ -769,3 +841,73 @@ def verification_history(
     return get_verification_history(
         project_id
     )
+
+
+# ============================================================
+# CITIZEN FEEDBACK
+#
+# Any citizen can report a concern against a project without an
+# account. Reports are never taken as proven on their own -- they
+# feed a capped, modest risk nudge and are always shown alongside
+# the verified AI signals for a human to read directly.
+# ============================================================
+
+@app.post("/project/{project_id}/citizen-report")
+def create_citizen_report(project_id: str, request: CitizenReportRequest):
+
+    projects = load_projects()
+
+    projects["project_id"] = projects["project_id"].astype(str).str.strip()
+    project_id = str(project_id).strip()
+
+    if project_id not in set(projects["project_id"]):
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    try:
+        result = submit_citizen_report(
+            project_id=project_id,
+            category=request.category,
+            description=request.description,
+            reporter_name=request.reporter_name,
+            reporter_contact=request.reporter_contact,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return result
+
+
+@app.get("/project/{project_id}/citizen-reports")
+def list_citizen_reports(project_id: str):
+
+    projects = load_projects()
+
+    projects["project_id"] = projects["project_id"].astype(str).str.strip()
+    project_id = str(project_id).strip()
+
+    if project_id not in set(projects["project_id"]):
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    return get_citizen_reports(project_id)
+
+
+@app.get("/citizen-report-categories")
+def citizen_report_categories():
+    return sorted(CITIZEN_ALLOWED_CATEGORIES)
+
+
+# ============================================================
+# GEO-SPATIAL OVERLAP PAIRS
+#
+# Exact project-location pairs whose sanctioned sites sit within
+# 300m of each other -- used by the map to draw the overlap directly
+# instead of only showing it as a per-project score.
+# ============================================================
+
+@app.get("/geo-overlaps")
+def geo_overlaps():
+    pairs = detect_geo_anomalies()
+
+    records = pairs.to_json(orient="records")
+
+    return json.loads(records)

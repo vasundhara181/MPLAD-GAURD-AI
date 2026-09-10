@@ -10,6 +10,8 @@ from image_verification import verify_images
 from inspection_analysis import analyze_inspections
 from ml_anomaly import detect_ml_anomalies
 from duplicate_detection import build_duplicate_risk
+from geo_detection import build_geo_risk
+from citizen_feedback import get_citizen_feedback_counts, citizen_report_to_score
 
 # ==================================================================
 # SIGNAL WEIGHTS
@@ -24,15 +26,17 @@ from duplicate_detection import build_duplicate_risk
 # ==================================================================
 
 SIGNAL_WEIGHTS = {
-    "financial": 0.15,
-    "delay": 0.15,
-    "progress": 0.15,
+    "financial": 0.13,
+    "delay": 0.13,
+    "progress": 0.14,
     "contractor": 0.10,
     "document": 0.10,
     "image": 0.10,
-    "inspection": 0.15,
+    "inspection": 0.10,
     "ml_anomaly": 0.05,
     "duplicate": 0.05,
+    "geo": 0.05,
+    "citizen": 0.05,
 }
 
 
@@ -90,6 +94,14 @@ def determine_signal_availability(project_availability: dict, module_frames: dic
             module_frames["ml_anomaly"], "ml_signal_available", default=False
         ),
         "duplicate": bool(project_availability.get("project_name")),
+        "geo": bool(
+            project_availability.get("latitude")
+            and project_availability.get("longitude")
+        ),
+        # Citizen reports are stored independently of the uploaded
+        # dataset's schema, so the channel is always available -- it's
+        # a feature of the app, not a column requirement.
+        "citizen": True,
     }
 
 
@@ -151,8 +163,16 @@ def build_risk_fusion():
         .fillna(0)
     )
 
+    # Matches contractor_risk.py's own "HIGH" threshold. Without this,
+    # a contractor with a clearly elevated repeat-offender score never
+    # counted toward risk_signal_count / the anomaly tally -- it only
+    # showed up buried in the blended score.
+    contractor_scores["contractor_anomaly"] = (
+        contractor_scores["contractor_risk_score"] >= 70
+    )
+
     contractor_scores = contractor_scores[
-        ["project_id", "contractor_risk_score"]
+        ["project_id", "contractor_risk_score", "contractor_anomaly"]
     ]
 
     # ------------------------------------------------
@@ -208,7 +228,38 @@ def build_risk_fusion():
     ].copy()
 
     # ------------------------------------------------
-    # 10. MERGE ALL RISK SIGNALS
+    # 10. GEO-SPATIAL OVERLAP DETECTION (haversine distance)
+    # ------------------------------------------------
+
+    geo_df = build_geo_risk()
+
+    geo_scores = geo_df[
+        ["project_id", "geo_anomaly", "geo_risk_score", "geo_overlap_count"]
+    ].copy()
+
+    # ------------------------------------------------
+    # 11. CITIZEN FEEDBACK (crowdsourced complementary signal)
+    # ------------------------------------------------
+
+    citizen_counts = get_citizen_feedback_counts()
+
+    citizen_scores = pd.DataFrame({
+        "project_id": list(citizen_counts.keys()),
+        "citizen_report_count": list(citizen_counts.values()),
+    })
+
+    if not citizen_scores.empty:
+        citizen_scores["citizen_risk_score"] = citizen_scores["citizen_report_count"].apply(
+            citizen_report_to_score
+        )
+        citizen_scores["citizen_anomaly"] = citizen_scores["citizen_report_count"] > 0
+    else:
+        citizen_scores = pd.DataFrame(
+            columns=["project_id", "citizen_report_count", "citizen_risk_score", "citizen_anomaly"]
+        )
+
+    # ------------------------------------------------
+    # 12. MERGE ALL RISK SIGNALS
     # ------------------------------------------------
 
     risk_df = financial_df[
@@ -225,7 +276,9 @@ def build_risk_fusion():
             "sanctioned_amount",
             "released_amount",
             "utilized_amount",
-            "completion_percentage"
+            "completion_percentage",
+            "latitude",
+            "longitude",
         ]
     ].copy()
 
@@ -239,6 +292,8 @@ def build_risk_fusion():
         inspection_scores,
         ml_scores,
         duplicate_scores,
+        geo_scores,
+        citizen_scores,
     ):
         risk_df = risk_df.merge(scores, on="project_id", how="left")
 
@@ -256,6 +311,9 @@ def build_risk_fusion():
         "inspection_risk_score",
         "ml_anomaly_score",
         "duplicate_risk_score",
+        "geo_risk_score",
+        "citizen_risk_score",
+        "citizen_report_count",
     ]
 
     for column in risk_columns:
@@ -304,6 +362,8 @@ def build_risk_fusion():
         "inspection": "inspection_risk_score",
         "ml_anomaly": "ml_anomaly_score",
         "duplicate": "duplicate_risk_score",
+        "geo": "geo_risk_score",
+        "citizen": "citizen_risk_score",
     }
 
     risk_df["overall_risk_score"] = 0.0
@@ -327,11 +387,14 @@ def build_risk_fusion():
     # documents.csv supplied) should never register as an "anomaly" --
     # there's nothing to flag, only something we couldn't check.
     for signal, column in [
+        ("contractor", "contractor_anomaly"),
         ("document", "document_anomaly"),
         ("image", "image_anomaly"),
         ("inspection", "inspection_anomaly"),
         ("ml_anomaly", "ml_anomaly"),
         ("duplicate", "duplicate_anomaly"),
+        ("geo", "geo_anomaly"),
+        ("citizen", "citizen_anomaly"),
     ]:
         if not availability[signal]:
             risk_df[column] = False
@@ -353,11 +416,14 @@ def build_risk_fusion():
         "financial_anomaly",
         "delay_anomaly",
         "progress_anomaly",
+        "contractor_anomaly",
         "document_anomaly",
         "image_anomaly",
         "inspection_anomaly",
         "ml_anomaly",
         "duplicate_anomaly",
+        "geo_anomaly",
+        "citizen_anomaly",
     ]
 
     for column in anomaly_columns:
