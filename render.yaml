@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: mplad-guard-ai-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: CORS_ALLOWED_ORIGINS
+        # Set this to your deployed frontend URL after the first deploy,
+        # e.g. https://mplad-guard-ai.vercel.app
+        value: ""
+
+    # Render's free plan has an ephemeral filesystem -- an uploaded
+    # dataset or a recorded verification survives until the service
+    # restarts/redeploys, then resets to the bundled demo data. That's
+    # fine for a hackathon demo. For real persistence, upgrade to a
+    # paid instance type and add:
+    #   disk:
+    #     name: mplad-data
+    #     mountPath: /data
+    #     sizeGB: 1

@@ -1,0 +1,20 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+backend/uvicorn.log
+
+# Runtime data (uploaded datasets, verification DB)
+data/uploaded/
+data/verification_feedback.db
+
+# Node (frontend has its own, more detailed .gitignore too)
+node_modules/
+.next/
+
+# Env files
+.env
+.env.local
+
+# OS
+.DS_Store
